@@ -30,6 +30,25 @@ fn format_vec(code: &str, labels: Vec<Label<Range<usize>, &str>>) -> String {
     format!("\n{}\n{block}{}\n", block.prologue(), block.epilogue())
 }
 
+fn format_with_context<const N: usize>(
+    code: &str,
+    labels: [Label<Range<usize>, &str>; N],
+    context: Range<usize>,
+) -> String {
+    let idx = LineIndex::new(code);
+
+    let mut prev_empty = false;
+    let block = Block::new_with_context(&idx, labels, context)
+        .unwrap()
+        .map_code(|s| {
+            let sub = usize::from(core::mem::replace(&mut prev_empty, s.is_empty()));
+            let s = s.replace('\t', "    ");
+            let w = unicode_width::UnicodeWidthStr::width(&*s);
+            CodeWidth::new(s, core::cmp::max(w, 1) - sub)
+        });
+    format!("\n{}\n{block}{}\n", block.prologue(), block.epilogue())
+}
+
 fn main() {
     // to find the byte positions in this example
     for ci in SRC.char_indices() {
@@ -386,7 +405,11 @@ fn u_color() {
     }
     let labels: Vec<_> = line_ranges
         .into_iter()
-        .map(|(start, end)| Label::new(start..end).unmarked().with_style(|s| format!("<start>{s}</stop>")))
+        .map(|(start, end)| {
+            Label::new(start..end)
+                .unmarked()
+                .with_style(|s| format!("<start>{s}</stop>"))
+        })
         .collect();
     let actual = format_vec(SRC, labels);
     println!("{actual}");
@@ -431,14 +454,12 @@ fn utu() {
 "
     );
 }
+
 #[test]
 fn u_u() {
     let should = format(
         SRC,
-        [
-            Label::new(4..4).unmarked(),
-            Label::new(70..70).unmarked(),
-        ],
+        [Label::new(4..4).unmarked(), Label::new(70..70).unmarked()],
     );
     println!("{should}");
     assert_eq!(
@@ -453,6 +474,7 @@ fn u_u() {
 "
     );
 }
+
 #[test]
 fn u_t() {
     let should = format(
@@ -484,7 +506,9 @@ fn u_t_color() {
     let should = format(
         SRC,
         [
-            Label::new(0..3).unmarked().with_style(|s| format!("<span>{s}</span>")),
+            Label::new(0..3)
+                .unmarked()
+                .with_style(|s| format!("<span>{s}</span>")),
             Label::new(70..70).with_text("!"),
         ],
     );
@@ -504,6 +528,7 @@ fn u_t_color() {
 "
     );
 }
+
 #[test]
 fn m_u() {
     let should = format(
@@ -524,6 +549,66 @@ fn m_u() {
   ┆     │  
   ┆     ╰─── hello
 4 │ this is getting silly
+──╯
+"
+    );
+}
+
+#[test]
+fn context_wt() {
+    let should = format_with_context(SRC, [Label::new(70..70).with_text("!")], 4..69);
+    println!("{should}");
+    assert_eq!(
+        should,
+        "
+  ╭─
+  │
+1 │ foo bar
+2 │ baz toto
+3 │ look, a fish 🐟 and a hook 🪝
+4 │ this is getting silly
+  ┆                    ┬ 
+  ┆                    │ 
+  ┆                    ╰── !
+──╯
+"
+    );
+}
+
+#[test]
+fn context_m() {
+    let should = format_with_context(SRC, [Label::new(4..4)], 0..15);
+    println!("{should}");
+    assert_eq!(
+        should,
+        "
+  ╭─
+  │
+1 │ foo bar
+  ┆     ─  
+2 │ baz toto
+──╯
+"
+    );
+}
+
+#[test]
+fn context_wt_context() {
+    let should = format_with_context(SRC, [Label::new(15..25).with_text("hello")], 10..72);
+    println!("{should}");
+    assert_eq!(
+        should,
+        "
+  ╭─
+  │
+2 │   baz toto
+  ┆          ▲
+  ┆ ╭────────╯
+3 │ │ look, a fish 🐟 and a hook 🪝
+  ┆ │        ▲                     
+  ┆ │        │                     
+  ┆ ╰────────┴────────────────────── hello
+4 │   this is getting silly
 ──╯
 "
     );

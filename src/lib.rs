@@ -353,12 +353,13 @@ impl<'a, T> Block<&'a str, T> {
                     lines.push((line_no, line, parts));
                 }
                 let parts = Parts {
-                    incoming: Some((0..end.bytes, 
+                    incoming: Some((
+                        0..end.bytes,
                         match label.kind {
                             LabelKind::WithText(t) => Some(t),
-                            _ => None
-                        }
-                        )),
+                            _ => None,
+                        },
+                    )),
                     ..Default::default()
                 };
                 lines.push((end.line_no, end.line, parts));
@@ -369,6 +370,54 @@ impl<'a, T> Block<&'a str, T> {
             .into_iter()
             .map(|(line_no, line, parts)| (line_no, parts.segment(line)));
         Some(Block(block.collect()))
+    }
+
+    /// Create a new block.
+    ///
+    /// Given a sequence of labels, find all input lines that are touched by the labels.
+    /// Then add unmarked labels (= output unannoteted lines) for all lines
+    /// that are touched by the context but not by any label.
+    ///
+    /// The label ranges `r` must fulfill the following conditions:
+    ///
+    /// * `r.start <= r.end`.
+    /// * If the length of the string that was used to construct `idx` is `len`, then
+    ///   `r.start <= len` and `r.end <= len`.
+    /// * For any two subsequent labels with ranges `r1` and `r2`,
+    ///   `r1.start < r2.start` and `r1.end <= r2.start`.
+    ///
+    /// If any of these conditions is not fulfilled, this function returns `None`.
+    pub fn new_with_context<I>(idx: &'a LineIndex, labels: I, context: Range<usize>) -> Option<Self>
+    where
+        I: IntoIterator<Item = Label<Range<usize>, T>>,
+    {
+        let mut labels: Vec<_> = labels.into_iter().collect();
+        labels.reverse();
+        let mut out_labels = Vec::new();
+        let start_line = idx.get(context.start)?.line_no;
+        let end_line = idx.get(context.end)?.line_no;
+        for line_no in start_line..end_line + 1 {
+            while let Some(last_label) = labels.iter().last() {
+                let label_end_line_no = idx.get(last_label.code.end)?.line_no;
+                if label_end_line_no < line_no {
+                    out_labels.push(labels.pop().unwrap());
+                } else {
+                    break;
+                }
+            }
+            if let Some(last_label) = labels.iter().last() {
+                let label_start_line_no = idx.get(last_label.code.start)?.line_no;
+                let label_end_line_no = idx.get(last_label.code.end)?.line_no;
+                if label_start_line_no <= line_no && line_no <= label_end_line_no {
+                    continue;
+                }
+            }
+            out_labels.push(
+                Label::new(idx.0[line_no].0..idx.0[line_no].0 + idx.0[line_no].1.len()).unmarked(),
+            );
+        }
+        out_labels.extend(labels.into_iter().rev());
+        Block::new(idx, out_labels)
     }
 }
 
